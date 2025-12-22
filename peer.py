@@ -1,255 +1,174 @@
-# peer.py
-
+# peer.py (Cập nhật RSA Encryption)
 import socket
 import threading
 import json
-import time
+import base64
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives import serialization, hashes
 
-# Cấu hình Server Đăng ký
-SERVER_HOST = '127.0.0.1'  # Thay đổi nếu Server ở máy khác
-SERVER_PORT = 8888 
-BUFFER_SIZE = 1024
+SERVER_HOST = '127.0.0.1'
+SERVER_PORT = 8888
+BUFFER_SIZE = 4096
 
-# Biến toàn cục của Peer
 MY_USERNAME = ""
 MY_P2P_PORT = 0
-PEER_LIST = {}  # {username: {"ip": ip, "p2p_port": port}}
+PEER_LIST = {}
 
-def get_my_ip():
-    """Tìm IP nội bộ của máy (cách đơn giản)"""
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        # Không cần kết nối thực tế, chỉ cần gọi connect() để lấy IP
-        s.connect(('10.255.255.255', 1))
-        IP = s.getsockname()[0]
-    except:
-        IP = '127.0.0.1'
-    finally:
-        s.close()
-    return IP
+# --- QUẢN LÝ KHÓA RSA ---
+private_key = None
+public_key_pem = ""
 
-def connect_to_server(request):
-    """Gửi yêu cầu đến Discovery Server"""
-    try:
-        server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server_socket.connect((SERVER_HOST, SERVER_PORT))
-        
-        server_socket.sendall(json.dumps(request).encode('utf-8'))
-        
-        response_data = server_socket.recv(BUFFER_SIZE).decode('utf-8')
-        response = json.loads(response_data)
-        
-        server_socket.close()
-        return response
-    except Exception as e:
-        print(f"[- LỖI MẠNG -] Không thể kết nối đến Discovery Server: {e}")
-        return None
+def generate_keys():
+    global private_key, public_key_pem
+    print("[HỆ THỐNG] Đang tạo cặp khóa RSA 2048-bit...")
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_key = private_key.public_key()
+    
+    # Chuyển Public Key sang định dạng chuỗi để gửi qua mạng
+    public_key_pem = public_key.public_key_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    ).decode('utf-8')
+    print("[HỆ THỐNG] Đã tạo khóa thành công.")
 
-# --- CHỨC NĂNG SERVER P2P (LẮNG NGHE) ---
+def encrypt_message(message, recipient_public_key_pem):
+    """Mã hóa tin nhắn bằng khóa công khai của người nhận"""
+    recipient_public_key = serialization.load_pem_public_key(
+        recipient_public_key_pem.encode('utf-8')
+    )
+    encrypted = recipient_public_key.encrypt(
+        message.encode('utf-8'),
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
+    # Encode Base64 để gửi qua JSON dễ dàng
+    return base64.b64encode(encrypted).decode('utf-8')
+
+def decrypt_message(encrypted_message_b64):
+    """Giải mã bằng khóa bí mật của chính mình"""
+    encrypted_data = base64.b64decode(encrypted_message_b64)
+    decrypted = private_key.decrypt(
+        encrypted_data,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
+    return decrypted.decode('utf-8')
+
+# --- MẠNG P2P ---
 
 def handle_p2p_connection(conn, addr):
-    """Xử lý kết nối P2P đến từ Peers khác"""
     try:
         data = conn.recv(BUFFER_SIZE).decode('utf-8')
-        if not data:
-            return
-
-        message = json.loads(data)
-        sender = message.get('sender', 'Không rõ')
-        content = message.get('content', 'Không có nội dung')
+        if not data: return
+        payload = json.loads(data)
         
-        print(f"\n<<< {sender} >>>: {content}")
-        print(f"Nhập lệnh > ", end="", flush=True) # In lại prompt
+        # Giải mã tin nhắn nhận được
+        encrypted_content = payload.get('content')
+        sender = payload.get('sender')
         
-    except json.JSONDecodeError:
-        print("\n[LỖI P2P] Nhận dữ liệu không phải JSON.")
+        try:
+            decrypted_content = decrypt_message(encrypted_content)
+            print(f"\n[BẢO MẬT] Nhận tin nhắn đã mã hóa từ {sender}")
+            print(f"<<< {sender} >>>: {decrypted_content}")
+        except:
+            print(f"\n[LỖI] Không thể giải mã tin nhắn từ {sender}!")
+            
+        print(f"Nhập lệnh > ", end="", flush=True)
     except Exception as e:
-        print(f"\n[LỖI P2P] Xử lý kết nối P2P: {e}")
+        print(f"\n[LỖI P2P Server]: {e}")
     finally:
         conn.close()
 
-def p2p_server_listener():
-    """Khởi động Server P2P để lắng nghe tin nhắn"""
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    
-    try:
-        # Lắng nghe trên IP thực của máy và cổng P2P đã chọn
-        server_socket.bind((get_my_ip(), MY_P2P_PORT))
-        server_socket.listen(5)
-        print(f"[P2P Server] Đang lắng nghe trên {get_my_ip()}:{MY_P2P_PORT}...")
-        
-        while True:
-            conn, addr = server_socket.accept()
-            # Xử lý mỗi tin nhắn P2P trong một luồng riêng
-            thread = threading.Thread(target=handle_p2p_connection, args=(conn, addr))
-            thread.start()
-            
-    except Exception as e:
-        # Nếu cổng đã được sử dụng hoặc lỗi khác
-        print(f"[- LỖI -] Không thể khởi động P2P Server trên cổng {MY_P2P_PORT}: {e}")
-        # Gửi lệnh LOGOUT để xóa thông tin khỏi Server nếu lỗi
-        logout_request = {"command": "LOGOUT", "username": MY_USERNAME}
-        connect_to_server(logout_request)
-        exit(1) # Thoát ứng dụng
-
-# --- CHỨC NĂNG CLIENT (GỬI TIN NHẮN) ---
-
 def send_p2p_message(recipient, content):
-    """Gửi tin nhắn trực tiếp đến Peer đích"""
     if recipient not in PEER_LIST:
-        print(f"[LỖI] Peer '{recipient}' không có trong danh sách hoặc chưa hoạt động.")
+        print("Người dùng không tồn tại.")
         return
-
-    peer_info = PEER_LIST[recipient]
     
+    recipient_info = PEER_LIST[recipient]
     try:
-        # Tạo kết nối socket mới đến Peer đích
-        p2p_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # 1. Mã hóa tin nhắn trước khi gửi
+        encrypted_msg = encrypt_message(content, recipient_info['public_key'])
         
-        # Sử dụng IP và Port P2P của Peer đích
-        dest_ip = peer_info['ip']
-        dest_port = peer_info['p2p_port']
-        
-        print(f"[CLIENT] Đang kết nối đến {recipient} ({dest_ip}:{dest_port})...")
-        p2p_socket.connect((dest_ip, dest_port))
-
-        # Đóng gói tin nhắn
-        message = {
-            "sender": MY_USERNAME,
-            "recipient": recipient,
-            "content": content
-        }
-        
-        p2p_socket.sendall(json.dumps(message).encode('utf-8'))
-        print(f"[CLIENT] Đã gửi tin nhắn đến {recipient}.")
-        
+        # 2. Gửi qua Socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.connect((recipient_info['ip'], recipient_info['p2p_port']))
+        s.sendall(json.dumps({"sender": MY_USERNAME, "content": encrypted_msg}).encode('utf-8'))
+        s.close()
+        print(f"[CLIENT] Đã mã hóa và gửi tin đến {recipient}.")
     except Exception as e:
-        print(f"[LỖI P2P] Không thể gửi tin nhắn đến {recipient}: {e}")
-    finally:
-        if 'p2p_socket' in locals():
-            p2p_socket.close()
+        print(f"[LỖI CLIENT]: {e}")
 
-# --- CHỨC NĂNG CHÍNH VÀ GIAO DIỆN ---
+# --- PHẦN CÒN LẠI GIỐNG FILE CŨ NHƯNG CẬP NHẬT BIẾN ---
+def get_my_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try: s.connect(('10.255.255.255', 1)); IP = s.getsockname()[0]
+    except: IP = '127.0.0.1'
+    finally: s.close()
+    return IP
+
+def connect_to_server(request):
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.connect((SERVER_HOST, SERVER_PORT))
+        s.sendall(json.dumps(request).encode('utf-8'))
+        resp = json.loads(s.recv(BUFFER_SIZE).decode('utf-8'))
+        s.close()
+        return resp
+    except: return None
 
 def get_peer_list():
-    """Lấy danh sách Peers mới nhất từ Discovery Server"""
     global PEER_LIST
-    request = {"command": "GET_PEERS"}
-    response = connect_to_server(request)
-    
-    if response and response.get('status') == 'OK':
-        PEER_LIST = {}
-        for peer in response.get('peers', []):
-            PEER_LIST[peer['username']] = peer
-        print("\n[CẬP NHẬT] Danh sách Peers đã được làm mới.")
-    else:
-        print("[CẬP NHẬT] Không thể lấy danh sách Peers.")
+    resp = connect_to_server({"command": "GET_PEERS"})
+    if resp and resp.get('status') == 'OK':
+        PEER_LIST = resp.get('peers', {})
+        print(f"[INFO] Đã cập nhật danh sách {len(PEER_LIST)} peers.")
 
-def display_help():
-    """Hiển thị hướng dẫn sử dụng"""
-    print("\n--- LỆNH HỆ THỐNG ---")
-    print("PEERS        : Hiển thị danh sách Peers đang hoạt động.")
-    print("CHAT [USER] [MSG] : Gửi tin nhắn P2P trực tiếp đến Peer đó.")
-    print("UPDATE       : Cập nhật danh sách Peers từ Server.")
-    print("EXIT         : Thoát ứng dụng và đăng xuất.")
-    print("------------------------")
-    
-def main_menu():
-    """Vòng lặp chính của ứng dụng"""
-    
+def p2p_server_listener():
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind((get_my_ip(), MY_P2P_PORT))
+    s.listen(5)
     while True:
-        try:
-            command_line = input(f"Nhập lệnh > ")
-            parts = command_line.split(' ', 2)
-            command = parts[0].upper()
+        conn, addr = s.accept()
+        threading.Thread(target=handle_p2p_connection, args=(conn, addr)).start()
 
-            if command == 'EXIT':
-                break
-            
-            elif command == 'PEERS':
-                if not PEER_LIST:
-                    print("[INFO] Danh sách rỗng. Hãy dùng lệnh UPDATE.")
-                else:
-                    print("\n--- DANH SÁCH PEERS ĐANG HOẠT ĐỘNG ---")
-                    for user, info in PEER_LIST.items():
-                        # Không in thông tin của chính mình
-                        if user != MY_USERNAME:
-                            print(f"- {user} ({info['ip']}:{info['p2p_port']})")
-                    print("--------------------------------------")
-
-            elif command == 'UPDATE':
-                get_peer_list()
-                
-            elif command == 'CHAT':
-                if len(parts) >= 3:
-                    recipient = parts[1]
-                    message_content = parts[2]
-                    send_p2p_message(recipient, message_content)
-                else:
-                    print("[LỖI] Cú pháp: CHAT [Username đích] [Tin nhắn]")
-
-            elif command == 'HELP':
-                display_help()
-                
-            else:
-                print(f"[LỖI] Lệnh không hợp lệ: {command}. Gõ 'HELP' để xem hướng dẫn.")
-
-        except EOFError: # Xử lý Ctrl+D
-            break
-        except Exception as e:
-            print(f"[LỖI] Xảy ra lỗi trong vòng lặp chính: {e}")
-
-    # Xử lý khi thoát
-    logout_request = {"command": "LOGOUT", "username": MY_USERNAME}
-    connect_to_server(logout_request)
-    print(f"\nĐã đăng xuất {MY_USERNAME}. Ứng dụng P2P Chat kết thúc.")
-
-def initialize_peer():
-    """Khởi tạo Peer: Nhập thông tin và đăng ký"""
+def main():
     global MY_USERNAME, MY_P2P_PORT
-
-    while not MY_USERNAME:
-        MY_USERNAME = input("Nhập Username của bạn: ").strip()
+    generate_keys() # Tự tạo khóa khi khởi động
     
-    while True:
-        try:
-            p2p_port_str = input("Nhập P2P Port lắng nghe (ví dụ: 50001): ").strip()
-            MY_P2P_PORT = int(p2p_port_str)
-            if 1024 <= MY_P2P_PORT <= 65535:
-                break
-            else:
-                print("Port phải nằm trong khoảng 1024 - 65535.")
-        except ValueError:
-            print("Port phải là số nguyên.")
-            
-    my_ip = get_my_ip()
-    print(f"IP nội bộ của bạn: {my_ip}")
+    MY_USERNAME = input("Username: ").strip()
+    MY_P2P_PORT = int(input("P2P Port: "))
     
-    # 1. Đăng ký với Server
-    register_request = {
+    # Gửi cả Public Key khi đăng ký
+    resp = connect_to_server({
         "command": "REGISTER", 
         "username": MY_USERNAME, 
-        "p2p_port": MY_P2P_PORT
-    }
+        "p2p_port": MY_P2P_PORT,
+        "public_key": public_key_pem
+    })
     
-    response = connect_to_server(register_request)
-    
-    if not response or response.get('status') != 'OK':
-        print(f"[- LỖI -] Đăng ký với Server thất bại: {response.get('message', 'Lỗi không xác định')}")
-        exit(1)
-        
-    print(f"*** Đăng ký thành công! Chào mừng {MY_USERNAME}! ***")
-    
-    # 2. Khởi động luồng Server P2P
-    p2p_thread = threading.Thread(target=p2p_server_listener, daemon=True)
-    p2p_thread.start()
-    
-    # 3. Lấy danh sách Peers lần đầu
+    if not resp or resp.get('status') != 'OK':
+        print("Đăng ký thất bại!"); return
+
+    threading.Thread(target=p2p_server_listener, daemon=True).start()
     get_peer_list()
-    
-    # 4. Bắt đầu Menu chính (luồng Client)
-    main_menu()
+
+    while True:
+        cmd_line = input("Nhập lệnh > ")
+        parts = cmd_line.split(' ', 2)
+        cmd = parts[0].upper()
+        if cmd == 'EXIT': break
+        elif cmd == 'PEERS': 
+            for u in PEER_LIST: print(f"- {u}")
+        elif cmd == 'UPDATE': get_peer_list()
+        elif cmd == 'CHAT' and len(parts) == 3:
+            send_p2p_message(parts[1], parts[2])
 
 if __name__ == "__main__":
-    initialize_peer()
+    main()
