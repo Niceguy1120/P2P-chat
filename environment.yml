@@ -1,0 +1,9 @@
+name: p2p-chat-env
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.10
+  - cryptography
+  - pip
+  - pip:
