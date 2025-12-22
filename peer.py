@@ -2,7 +2,6 @@ import socket
 import threading
 import json
 import base64
-import sys
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization, hashes
 
@@ -13,6 +12,10 @@ BUFFER_SIZE = 8192
 MY_USERNAME = ""
 MY_P2P_PORT = 0
 PEER_LIST = {}
+
+# --- BIẾN HỆ THỐNG PHÂN TÁN ---
+lamport_clock = 0
+clock_lock = threading.Lock() # Đảm bảo an toàn luồng khi cập nhật clock
 
 private_key = None
 public_key_pem = ""
@@ -42,18 +45,32 @@ def decrypt_message(encrypted_message_b64):
         padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None)
     ).decode('utf-8')
 
-def get_my_ip():
-    """Ưu tiên trả về localhost để test trên 1 máy dễ dàng hơn"""
-    return '127.0.0.1'
+def update_clock(received_clock=None):
+    """Cập nhật Lamport Clock theo quy tắc Max(local, received) + 1"""
+    global lamport_clock
+    with clock_lock:
+        if received_clock is not None:
+            lamport_clock = max(lamport_clock, received_clock) + 1
+        else:
+            lamport_clock += 1
+        return lamport_clock
 
 def handle_p2p_connection(conn, addr):
     try:
         data = conn.recv(BUFFER_SIZE).decode('utf-8')
         if not data: return
         payload = json.loads(data)
+        
         sender = payload.get('sender')
+        msg_clock = payload.get('timestamp')
+        
+        # Cập nhật clock khi nhận tin
+        current_l = update_clock(msg_clock)
+        
         decrypted_content = decrypt_message(payload.get('content'))
-        print(f"\n[BẢO MẬT] Nhận tin từ {sender}: {decrypted_content}")
+        
+        print(f"\n[BẢO MẬT] (Lamport: {msg_clock}) {sender}: {decrypted_content}")
+        print(f"[HỆ THỐNG] Clock nội bộ cập nhật thành: {current_l}")
         print(f"Nhập lệnh > ", end="", flush=True)
     except Exception as e:
         print(f"\n[LỖI P2P NHẬN]: {e}")
@@ -64,9 +81,9 @@ def p2p_server_listener():
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
-        s.bind((get_my_ip(), MY_P2P_PORT))
+        s.bind(('127.0.0.1', MY_P2P_PORT))
         s.listen(5)
-        print(f"[HỆ THỐNG] Đang lắng nghe P2P tại {get_my_ip()}:{MY_P2P_PORT}")
+        print(f"[HỆ THỐNG] Đang lắng nghe P2P tại 127.0.0.1:{MY_P2P_PORT}")
         while True:
             conn, addr = s.accept()
             threading.Thread(target=handle_p2p_connection, args=(conn, addr), daemon=True).start()
@@ -80,15 +97,26 @@ def send_p2p_message(recipient, content):
     
     info = PEER_LIST[recipient]
     try:
+        # Cập nhật clock trước khi gửi
+        current_l = update_clock()
+        
         enc_msg = encrypt_message(content, info['public_key'])
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(3) # Timeout 3 giây để tránh treo
+        s.settimeout(3)
         s.connect((info['ip'], info['p2p_port']))
-        s.sendall(json.dumps({"sender": MY_USERNAME, "content": enc_msg}).encode('utf-8'))
+        
+        # Gửi kèm Lamport Timestamp
+        payload = {
+            "sender": MY_USERNAME,
+            "content": enc_msg,
+            "timestamp": current_l
+        }
+        
+        s.sendall(json.dumps(payload).encode('utf-8'))
         s.close()
-        print(f"[CLIENT] Đã gửi tin mã hóa tới {recipient}.")
+        print(f"[CLIENT] Đã gửi (Clock: {current_l}) tới {recipient}.")
     except Exception as e:
-        print(f"[LỖI GỬI]: {e} (Kiểm tra Port {info['p2p_port']} của {recipient})")
+        print(f"[LỖI GỬI]: {e}")
 
 def main():
     global MY_USERNAME, MY_P2P_PORT, PEER_LIST
@@ -96,9 +124,9 @@ def main():
     MY_USERNAME = input("Username: ").strip().lower()
     MY_P2P_PORT = int(input("P2P Port: "))
 
-    # Đăng ký
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    # Đăng ký với Discovery Server
     try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.connect((SERVER_HOST, SERVER_PORT))
         s.sendall(json.dumps({
             "command": "REGISTER", "username": MY_USERNAME, 
@@ -120,15 +148,17 @@ def main():
 
         if cmd == 'EXIT': break
         elif cmd == 'PEERS':
-            for u, info in PEER_LIST.items():
-                if u != MY_USERNAME: print(f"- {u} ({info['ip']}:{info['p2p_port']})")
+            for u in PEER_LIST:
+                if u != MY_USERNAME: print(f"- {u}")
         elif cmd == 'UPDATE':
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.connect((SERVER_HOST, SERVER_PORT))
-            s.sendall(json.dumps({"command": "GET_PEERS"}).encode('utf-8'))
-            PEER_LIST = json.loads(s.recv(BUFFER_SIZE).decode('utf-8')).get('peers', {})
-            s.close()
-            print(f"[HỆ THỐNG] Đã cập nhật {len(PEER_LIST)} người dùng.")
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.connect((SERVER_HOST, SERVER_PORT))
+                s.sendall(json.dumps({"command": "GET_PEERS"}).encode('utf-8'))
+                PEER_LIST = json.loads(s.recv(BUFFER_SIZE).decode('utf-8')).get('peers', {})
+                s.close()
+                print(f"[HỆ THỐNG] Đã cập nhật {len(PEER_LIST)} người dùng.")
+            except: print("Lỗi cập nhật danh sách.")
         elif cmd == 'CHAT' and len(parts) == 3:
             send_p2p_message(parts[1], parts[2])
 
