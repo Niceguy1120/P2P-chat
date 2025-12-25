@@ -40,14 +40,12 @@ P2P Enterprise Chat System
     
 
 Bash
-
-Plain textANTLR4BashCC#CSSCoffeeScriptCMakeDartDjangoDockerEJSErlangGitGoGraphQLGroovyHTMLJavaJavaScriptJSONJSXKotlinLaTeXLessLuaMakefileMarkdownMATLABMarkupObjective-CPerlPHPPowerShell.propertiesProtocol BuffersPythonRRubySass (Sass)Sass (Scss)SchemeSQLShellSwiftSVGTSXTypeScriptWebAssemblyYAMLXML`   conda env create -f environment.yml  conda activate p2p-chat-env   `
+`   conda env create -f environment.yml  conda activate p2p-chat-env   `
 
 Hoặc cài đặt thủ công qua pip:
 
 Bash
-
-Plain textANTLR4BashCC#CSSCoffeeScriptCMakeDartDjangoDockerEJSErlangGitGoGraphQLGroovyHTMLJavaJavaScriptJSONJSXKotlinLaTeXLessLuaMakefileMarkdownMATLABMarkupObjective-CPerlPHPPowerShell.propertiesProtocol BuffersPythonRRubySass (Sass)Sass (Scss)SchemeSQLShellSwiftSVGTSXTypeScriptWebAssemblyYAMLXML`   pip install cryptography   `
+`   pip install cryptography   `
 
 ### 2\. Cấu trúc file
 
@@ -66,16 +64,14 @@ Plain textANTLR4BashCC#CSSCoffeeScriptCMakeDartDjangoDockerEJSErlangGitGoGraphQL
 Chạy máy chủ danh bạ trước để các Peer có thể tìm thấy nhau:
 
 Bash
-
-Plain textANTLR4BashCC#CSSCoffeeScriptCMakeDartDjangoDockerEJSErlangGitGoGraphQLGroovyHTMLJavaJavaScriptJSONJSXKotlinLaTeXLessLuaMakefileMarkdownMATLABMarkupObjective-CPerlPHPPowerShell.propertiesProtocol BuffersPythonRRubySass (Sass)Sass (Scss)SchemeSQLShellSwiftSVGTSXTypeScriptWebAssemblyYAMLXML`   python server.py   `
+`   python server.py   `
 
 ### Bước 2: Khởi động các Peer
 
 Mở các terminal mới cho từng người dùng (ví dụ: Alice và Bob).**Lưu ý:** Mỗi người dùng trên cùng một máy phải sử dụng một **P2P Port** khác nhau.
 
 Bash
-
-Plain textANTLR4BashCC#CSSCoffeeScriptCMakeDartDjangoDockerEJSErlangGitGoGraphQLGroovyHTMLJavaJavaScriptJSONJSXKotlinLaTeXLessLuaMakefileMarkdownMATLABMarkupObjective-CPerlPHPPowerShell.propertiesProtocol BuffersPythonRRubySass (Sass)Sass (Scss)SchemeSQLShellSwiftSVGTSXTypeScriptWebAssemblyYAMLXML`   # Terminal 1 (Alice)  python peer.py  # Nhập Username: alice  # Nhập Passphrase: (mật khẩu bất kỳ để mã hóa file chat)  # Nhập P2P Port: 5001  # Terminal 2 (Bob)  python peer.py  # Nhập Username: bob  # Nhập Passphrase: (mật khẩu bất kỳ)  # Nhập P2P Port: 5002   `
+`   # Terminal 1 (Alice)  python peer.py  # Nhập Username: alice  # Nhập Passphrase: (mật khẩu bất kỳ để mã hóa file chat)  # Nhập P2P Port: 5001  # Terminal 2 (Bob)  python peer.py  # Nhập Username: bob  # Nhập Passphrase: (mật khẩu bất kỳ)  # Nhập P2P Port: 5002   `
 
 ### Bước 3: Các lệnh trong ứng dụng
 
