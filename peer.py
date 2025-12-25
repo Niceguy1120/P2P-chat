@@ -5,137 +5,173 @@ import base64
 import os
 import time
 import random
+from datetime import datetime, timedelta
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
 
-# --- CẤU HÌNH HỆ THỐNG ---
-SERVER_HOST = '127.0.0.1'
+# --- CẤU HÌNH ---
+SERVER_HOST = '127.0.0.1' 
 SERVER_PORT = 8888
-BUFFER_SIZE = 65536  
+UDP_BROADCAST_PORT = 9999 
+BUFFER_SIZE = 65536
 GOSSIP_INTERVAL = 15 
 
 MY_USERNAME = ""
 MY_P2P_PORT = 0
-PEER_LIST = {}
+PEER_LIST = {} # {username: {ip, p2p_port, public_key}}
 
-# --- BIẾN DISTRIBUTED LEDGER & CLOCK ---
+# --- SECURITY & LEDGER ---
 vector_clock = {}
 ledger = [] 
 clock_lock = threading.Lock()
 aes_key = None 
-
-# --- BIẾN MẬT MÃ RSA ---
 private_key = None
 public_key_pem = ""
 
-# --- 1. BẢO MẬT DỮ LIỆU LƯU TRỮ (AES-256) ---
+# --- 1. QUẢN LÝ DANH BẠ LOCAL (CACHE & PERSISTENCE) ---
+
+def save_contacts():
+    """Lưu danh bạ local kèm dấu thời gian"""
+    data = {
+        "last_updated": datetime.now().isoformat(),
+        "peers": PEER_LIST
+    }
+    with open(f"{MY_USERNAME}_contacts.json", "w", encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+
+def load_contacts():
+    """Tải danh bạ từ file local để sẵn sàng chat ngay cả khi server chết"""
+    global PEER_LIST
+    path = f"{MY_USERNAME}_contacts.json"
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding='utf-8') as f:
+                data = json.load(f)
+                PEER_LIST = data.get("peers", {})
+                return datetime.fromisoformat(data.get("last_updated"))
+        except: return None
+    return None
+
+# --- 2. CƠ CHẾ UDP BROADCAST (PHÒNG VỆ KHI SERVER CHẾT) ---
+
+def udp_broadcast_listener():
+    """Luôn lắng nghe yêu cầu tìm kiếm trong mạng nội bộ"""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind(('', UDP_BROADCAST_PORT))
+    except: return
+
+    while True:
+        try:
+            data, addr = sock.recvfrom(2048)
+            msg = json.loads(data.decode())
+            if msg.get("type") == "DISCOVERY_REQ" and msg.get("sender") != MY_USERNAME:
+                # Phản hồi lại thông tin P2P của mình để Peer khác cập nhật
+                resp = {
+                    "type": "DISCOVERY_RES",
+                    "sender": MY_USERNAME,
+                    "p2p_port": MY_P2P_PORT,
+                    "public_key": public_key_pem
+                }
+                sock.sendto(json.dumps(resp).encode(), addr)
+        except: pass
+
+def send_udp_discovery():
+    """Phát tin tìm kiếm Peer xung quanh (Sử dụng khi Server không phản hồi)"""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    sock.settimeout(2)
+    
+    req = {"type": "DISCOVERY_REQ", "sender": MY_USERNAME}
+    # Gửi tới địa chỉ broadcast của mạng LAN
+    sock.sendto(json.dumps(req).encode(), ('255.255.255.255', UDP_BROADCAST_PORT))
+    
+    start_time = time.time()
+    while time.time() - start_time < 2:
+        try:
+            data, addr = sock.recvfrom(2048)
+            res = json.loads(data.decode())
+            if res.get("type") == "DISCOVERY_RES":
+                user = res["sender"]
+                with clock_lock:
+                    PEER_LIST[user] = {
+                        "ip": addr[0],
+                        "p2p_port": res["p2p_port"],
+                        "public_key": res["public_key"]
+                    }
+                print(f"[UDP] Đã phát hiện Peer '{user}' tại {addr[0]}")
+        except: break
+    sock.close()
+
+# --- 3. BẢO MẬT & ĐỒNG BỘ (RSA, AES, GOSSIP) ---
 
 def derive_key(passphrase: str):
-    salt = b'distributed_systems_lab_salt'
-    kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=salt,
-        iterations=100000,
-        backend=default_backend()
-    )
+    kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=b'lan_p2p_salt', iterations=100000, backend=default_backend())
     return base64.urlsafe_b64encode(kdf.derive(passphrase.encode()))
 
 def save_ledger():
     if aes_key is None: return
-    filename = f"{MY_USERNAME}.json"
     with clock_lock:
-        # Sắp xếp Sổ cái theo quan hệ nhân quả trước khi lưu
         ledger.sort(key=lambda x: (sum(x['vc'].values()), x['sender']))
-        data_str = json.dumps({"vector_clock": vector_clock, "ledger": ledger}, ensure_ascii=False)
-    
-    f_cipher = Fernet(aes_key)
-    encrypted = f_cipher.encrypt(data_str.encode('utf-8'))
-    with open(filename, 'wb') as f:
-        f.write(encrypted)
+        data = json.dumps({"vector_clock": vector_clock, "ledger": ledger}, ensure_ascii=False)
+    encrypted = Fernet(aes_key).encrypt(data.encode())
+    with open(f"{MY_USERNAME}.json", 'wb') as f: f.write(encrypted)
 
-def load_ledger(passphrase: str):
+def load_ledger(pwd):
     global ledger, vector_clock, aes_key
-    filename = f"{MY_USERNAME}.json"
-    aes_key = derive_key(passphrase)
-    if os.path.exists(filename):
+    aes_key = derive_key(pwd)
+    if os.path.exists(f"{MY_USERNAME}.json"):
         try:
-            with open(filename, 'rb') as f:
-                decrypted = Fernet(aes_key).decrypt(f.read()).decode('utf-8')
-            data = json.loads(decrypted)
-            ledger = data.get('ledger', [])
-            vector_clock = data.get('vector_clock', {})
+            with open(f"{MY_USERNAME}.json", 'rb') as f:
+                dec = Fernet(aes_key).decrypt(f.read()).decode()
+            d = json.loads(dec); ledger = d['ledger']; vector_clock = d['vector_clock']
             return True
         except: return False
     return True
 
-# --- 2. BẢO MẬT ĐƯỜNG TRUYỀN (RSA) ---
-
 def generate_keys():
     global private_key, public_key_pem
-    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    public_key_pem = private_key.public_key().public_bytes(
-        encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo
-    ).decode('utf-8')
+    private_key = rsa.generate_private_key(65537, 2048)
+    public_key_pem = private_key.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo).decode()
 
-def decrypt_msg(enc_b64):
-    try:
-        return private_key.decrypt(
-            base64.b64decode(enc_b64),
-            padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None)
-        ).decode('utf-8')
-    except: return "[Nội dung đã mã hóa]"
+def decrypt_msg(enc):
+    try: return private_key.decrypt(base64.b64decode(enc), padding.OAEP(padding.MGF1(hashes.SHA256()), hashes.SHA256(), None)).decode()
+    except: return "[Nội dung mã hóa]"
 
-# --- 3. ĐỒNG BỘ HÓA (ANTI-ENTROPY / GOSSIP) ---
-
-def sync_data(remote_ledger, remote_vc):
+def sync_data(r_ledger, r_vc):
     global ledger, vector_clock
     with clock_lock:
-        # Anti-Entropy: Hợp nhất logs (Loại bỏ trùng lặp)
-        local_sigs = {json.dumps(m, sort_keys=True) for m in ledger}
-        for m in remote_ledger:
-            if json.dumps(m, sort_keys=True) not in local_sigs:
-                ledger.append(m)
-        # Vector Clock: Max update
-        all_nodes = set(vector_clock.keys()) | set(remote_vc.keys())
-        for n in all_nodes:
-            vector_clock[n] = max(vector_clock.get(n, 0), remote_vc.get(n, 0))
+        l_sigs = {json.dumps(m, sort_keys=True) for m in ledger}
+        for m in r_ledger:
+            if json.dumps(m, sort_keys=True) not in l_sigs: ledger.append(m)
+        for n in (set(vector_clock.keys()) | set(r_vc.keys())):
+            vector_clock[n] = max(vector_clock.get(n, 0), r_vc.get(n, 0))
         save_ledger()
 
 def anti_entropy_loop():
     while True:
         time.sleep(GOSSIP_INTERVAL)
         if not PEER_LIST or not MY_USERNAME or aes_key is None: continue
-        targets = [u for u in PEER_LIST.keys() if u != MY_USERNAME]
-        if not targets: continue
-        target = random.choice(targets)
-        info = PEER_LIST[target]
+        target = random.choice([u for u in PEER_LIST.keys() if u != MY_USERNAME] or [None])
+        if not target: continue
         try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(2)
-            s.connect((info['ip'], info['p2p_port']))
-            with clock_lock:
-                payload = {"sender": MY_USERNAME, "type": "GOSSIP", "vector_clock": dict(vector_clock), "ledger": ledger}
-            s.sendall(json.dumps(payload).encode('utf-8'))
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.settimeout(2)
+            s.connect((PEER_LIST[target]['ip'], PEER_LIST[target]['p2p_port']))
+            s.sendall(json.dumps({"sender":MY_USERNAME, "type":"GOSSIP", "vector_clock":dict(vector_clock), "ledger":ledger}).encode())
             s.close()
         except: pass
 
-# --- 4. GIAO TIẾP MẠNG P2P ---
-
 def handle_p2p(conn, addr):
     try:
-        data = conn.recv(BUFFER_SIZE).decode('utf-8')
+        data = conn.recv(BUFFER_SIZE).decode()
         if not data: return
-        payload = json.loads(data)
-        sync_data(payload.get('ledger', []), payload.get('vector_clock', {}))
-        
-        if payload.get('type') == 'CHAT':
-            decrypted = decrypt_msg(payload.get('content'))
-            print(f"\n<<< {payload['sender']} >>>: {decrypted}")
-            print(f"Nhập lệnh > ", end="", flush=True)
+        p = json.loads(data); sync_data(p.get('ledger', []), p.get('vector_clock', {}))
+        if p.get('type') == 'CHAT':
+            print(f"\n<<< {p['sender']} >>>: {decrypt_msg(p['content'])}\nNhập lệnh > ", end="", flush=True)
     except: pass
     finally: conn.close()
 
@@ -146,27 +182,7 @@ def p2p_listener():
         c, a = s.accept()
         threading.Thread(target=handle_p2p, args=(c, a), daemon=True).start()
 
-def send_chat(target, text):
-    target = target.lower()
-    if target not in PEER_LIST: return
-    info = PEER_LIST[target]
-    with clock_lock:
-        vector_clock[MY_USERNAME] = vector_clock.get(MY_USERNAME, 0) + 1
-        pub_key = PEER_LIST[target]['public_key']
-        # RSA Encrypt
-        enc = base64.b64encode(serialization.load_pem_public_key(pub_key.encode()).encrypt(
-            text.encode(), padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None)
-        )).decode()
-        ledger.append({"sender": MY_USERNAME, "content": enc, "vc": dict(vector_clock)})
-        save_ledger()
-        payload = {"sender": MY_USERNAME, "type": "CHAT", "content": enc, "vector_clock": dict(vector_clock), "ledger": ledger}
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.settimeout(3)
-        s.connect((info['ip'], info['p2p_port']))
-        s.sendall(json.dumps(payload).encode('utf-8')); s.close()
-    except: print("Lỗi gửi tin.")
-
-# --- 5. CHƯƠNG TRÌNH CHÍNH ---
+# --- 4. MAIN LOGIC (CHẾ ĐỘ BẢO HIỂM MẠNG LAN) ---
 
 def main():
     global MY_USERNAME, MY_P2P_PORT, PEER_LIST
@@ -176,13 +192,39 @@ def main():
     if not load_ledger(pwd): return
     MY_P2P_PORT = int(input("P2P Port: "))
 
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.connect((SERVER_HOST, SERVER_PORT))
-        s.sendall(json.dumps({"command": "REGISTER", "username": MY_USERNAME, "p2p_port": MY_P2P_PORT, "public_key": public_key_pem}).encode('utf-8'))
-        s.recv(1024); s.close()
-    except: print("Server Offline!"); return
-
     threading.Thread(target=p2p_listener, daemon=True).start()
+    threading.Thread(target=udp_broadcast_listener, daemon=True).start()
+
+    # Bước 1: Thử Server
+    server_available = False
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.settimeout(2)
+        s.connect((SERVER_HOST, SERVER_PORT))
+        s.sendall(json.dumps({"command": "REGISTER", "username": MY_USERNAME, "p2p_port": MY_P2P_PORT, "public_key": public_key_pem}).encode())
+        s.recv(1024); s.close()
+        server_available = True
+        print("[HỆ THỐNG] Kết nối Discovery Server thành công.")
+    except:
+        print("[CẢNH BÁO] Server không phản hồi. Đang sử dụng phương thức dự phòng LAN.")
+
+    # Bước 2: Cập nhật danh bạ (Local Cache vs Server)
+    last_upd = load_contacts()
+    if server_available:
+        # Chỉ cập nhật từ server nếu chưa có cache hoặc cache > 1 tiếng
+        if last_upd is None or datetime.now() - last_upd > timedelta(hours=1):
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.connect((SERVER_HOST, SERVER_PORT))
+                s.sendall(json.dumps({"command": "GET_PEERS"}).encode())
+                PEER_LIST = json.loads(s.recv(BUFFER_SIZE).decode()).get('peers', {})
+                s.close()
+                save_contacts()
+                print("[HỆ THỐNG] Đã cập nhật danh bạ từ Server (Cache 1h).")
+            except: pass
+    else:
+        # Server chết: Dùng cache local và phát UDP tìm Peer đang sống trong mạng
+        if PEER_LIST: print(f"[HỆ THỐNG] Sử dụng danh bạ lưu trữ local ({len(PEER_LIST)} Peer).")
+        send_udp_discovery()
+
     threading.Thread(target=anti_entropy_loop, daemon=True).start()
 
     while True:
@@ -190,35 +232,34 @@ def main():
         if not line: continue
         args = line.split(' ', 2)
         cmd = args[0].upper()
-
+        
         if cmd == 'EXIT': break
-        elif cmd == 'UPDATE':
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.connect((SERVER_HOST, SERVER_PORT))
-                s.sendall(json.dumps({"command": "GET_PEERS"}).encode('utf-8'))
-                PEER_LIST = json.loads(s.recv(BUFFER_SIZE).decode('utf-8')).get('peers', {})
-                s.close()
-                print("[HỆ THỐNG] Đã cập nhật danh bạ.")
-            except: print("Lỗi kết nối Server.")
+        elif cmd == 'UPDATE': 
+            # Ưu tiên cập nhật qua mạng LAN ngay lập tức
+            send_udp_discovery()
+            save_contacts()
         elif cmd == 'PEERS':
-            for u in PEER_LIST: 
-                if u != MY_USERNAME: print(f"- {u}")
+            for u in PEER_LIST: print(f"- {u} ({PEER_LIST[u]['ip']})")
         elif cmd == 'CHAT' and len(args) == 3:
-            send_chat(args[1], args[2])
-        elif cmd == 'SHOW': # Hiển thị tất cả (bao gồm tin mã hóa cho người khác)
-            for m in ledger: print(f"[{m['sender'].upper()}] {decrypt_msg(m['content'])}")
+            target = args[1].lower()
+            if target in PEER_LIST:
+                with clock_lock:
+                    vector_clock[MY_USERNAME] = vector_clock.get(MY_USERNAME, 0) + 1
+                    pub = PEER_LIST[target]['public_key']
+                    enc = base64.b64encode(serialization.load_pem_public_key(pub.encode()).encrypt(args[2].encode(), padding.OAEP(padding.MGF1(hashes.SHA256()), hashes.SHA256(), None))).decode()
+                    ledger.append({"sender": MY_USERNAME, "content": enc, "vc": dict(vector_clock)})
+                    save_ledger()
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.settimeout(2)
+                    s.connect((PEER_LIST[target]['ip'], PEER_LIST[target]['p2p_port']))
+                    s.sendall(json.dumps({"sender": MY_USERNAME, "type": "CHAT", "content": enc, "vector_clock": dict(vector_clock), "ledger": ledger}).encode())
+                    s.close()
+                except: print("Peer Offline. Thử lại sau.")
         elif cmd == 'HISTORY':
-            print(f"\n--- LỊCH SỬ HỘI THOẠI CỦA {MY_USERNAME.upper()} ---")
-            found = False
-            with clock_lock:
-                ledger.sort(key=lambda x: (sum(x['vc'].values()), x['sender']))
-                for m in ledger:
-                    decrypted = decrypt_msg(m['content'])
-                    if m['sender'] == MY_USERNAME or decrypted != "[Nội dung đã mã hóa]":
-                        found = True
-                        prefix = "GỬI ĐI" if m['sender'] == MY_USERNAME else f"NHẬN TỪ {m['sender'].upper()}"
-                        print(f"[{prefix}] {decrypted} | VC: {m['vc']}")
-            if not found: print("Không có hội thoại nào liên quan đến bạn.")
+            for m in ledger:
+                dec = decrypt_msg(m['content'])
+                if m['sender'] == MY_USERNAME or dec != "[Nội dung mã hóa]":
+                    print(f"[{m['sender'].upper()}] {dec}")
 
 if __name__ == "__main__":
     main()
