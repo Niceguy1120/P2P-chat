@@ -29,12 +29,10 @@ Dưới đây là file README.md chuyên nghiệp, được thiết kế để b
 - Python 3.10 trở lên.
 - Cài đặt môi trường thông qua file environment.yml (khuyên dùng Conda):
 
-Bash
 ` conda env create -f environment.yml  conda activate p2p-chat-env `
 
 Hoặc cài đặt thủ công qua pip:
 
-Bash
 ` pip install cryptography `
 
 ### 2\. Cấu trúc file
@@ -56,17 +54,16 @@ Bash
 
 Mở các terminal mới cho từng người dùng (ví dụ: Alice và Bob).**Lưu ý:** Mỗi người dùng trên cùng một máy phải sử dụng một **P2P Port** khác nhau.
 
-Bash
 ` # Terminal 1 (Alice)`
-`python peer.py `
-`# Nhập Username: alice`
-`# Nhập Passphrase: (mật khẩu bất kỳ để mã hóa file chat)`
-`# Nhập P2P Port: 5001`
+- `python peer.py `
+- `# Nhập Username: alice`
+- `# Nhập Passphrase: (mật khẩu bất kỳ để mã hóa file chat)`
+- `# Nhập P2P Port: 5001`
 `# Terminal 2 (Bob):`
-`python peer.py`
-`# Nhập Username: bob`
-`# Nhập Passphrase: (mật khẩu bất kỳ)`
-`# Nhập P2P Port: 5002  `
+- `python peer.py`
+- `# Nhập Username: bob`
+- `# Nhập Passphrase: (mật khẩu bất kỳ)`
+- `# Nhập P2P Port: 5002  `
 
 ### Bước 3: Các lệnh trong ứng dụng
 
