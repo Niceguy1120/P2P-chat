@@ -1,80 +1,90 @@
-# Cài Đặt và Chạy Demo với Conda
+Dưới đây là file README.md chuyên nghiệp, được thiết kế để bạn có thể dán trực tiếp vào thư mục đồ án. Nội dung tập trung vào cách cài đặt, vận hành và các kịch bản test để gây ấn tượng với giảng viên.
 
-## Bước 1: Tạo Môi trường Conda
+P2P Enterprise Chat System
+==========================
 
-Bạn nên tạo một môi trường riêng biệt để cài đặt các dependency (mặc dù dự án này không cần dependency bên ngoài, đây vẫn là một thói quen tốt).
+Đây là hệ thống trò chuyện phân tán (Peer-to-Peer) được thiết kế cho môi trường mạng nội bộ doanh nghiệp. Hệ thống tích hợp các cơ chế bảo mật nâng cao, tính nhất quán dữ liệu và khả năng tự phục hồi khi máy chủ danh bạ (Discovery Server) gặp sự cố.
 
-Mở Terminal hoặc Anaconda Prompt và chạy lệnh sau:
+🚀 Tính năng nổi bật
+--------------------
 
-`# 1. Tạo môi trường mới tên là 'p2p-chat-env' với Python 3.10 (hoặc phiên bản bạn muốn)  conda create --name p2p-chat-env python=3.10 -y  # 2. Kích hoạt môi trường vừa tạo  conda activate p2p-chat-env`
+*   **Kiến trúc Hybrid P2P:** Kết hợp Discovery Server và UDP Broadcast để tìm kiếm người dùng.
+    
+*   **Bảo mật đa tầng:**
+    
+    *   **RSA-2048:** Mã hóa tin nhắn trên đường truyền (End-to-End Encryption).
+        
+    *   **AES-256 (Fernet):** Mã hóa toàn bộ sổ cái (Ledger) khi lưu trữ trên ổ cứng.
+        
+    *   **PBKDF2:** Bảo vệ sổ cái bằng Passphrase cá nhân.
+        
+*   **Đồng bộ dữ liệu thông minh:**
+    
+    *   **Vector Clock:** Duy trì quan hệ nhân quả và thứ tự tin nhắn.
+        
+    *   **Gossip Protocol & Delta Sync:** Tự động đồng bộ các tin nhắn còn thiếu, tối ưu hóa băng thông cho nhóm đông người (đã test với quy mô 20 nodes).
+        
+*   **Khả năng chịu lỗi (Fault Tolerance):** \* **Offline Messaging:** Tự động lưu và gửi lại tin nhắn khi người nhận online trở lại.
+    
+    *   **Self-healing:** Tự động sử dụng danh bạ local hoặc Broadcast LAN nếu Server chết.
+        
 
-Bây giờ bạn đang ở trong môi trường p2p-chat-env. Bạn sẽ thấy tên môi trường xuất hiện ở đầu dòng lệnh.
+🛠 Cài đặt
+----------
 
-## Bước 2: Chuẩn bị Mã nguồn
+### 1\. Yêu cầu hệ thống
 
-Đảm bảo bạn đã lưu hai file mã nguồn đã cung cấp:
+*   Python 3.10 trở lên.
+    
+*   Cài đặt môi trường thông qua file environment.yml (khuyên dùng Conda):
+    
 
-- [server.py]
-- [peer.py]
+Bash
 
-Đặt cả hai file này vào cùng một thư mục (ví dụ: p2p_chat_project).
+Plain textANTLR4BashCC#CSSCoffeeScriptCMakeDartDjangoDockerEJSErlangGitGoGraphQLGroovyHTMLJavaJavaScriptJSONJSXKotlinLaTeXLessLuaMakefileMarkdownMATLABMarkupObjective-CPerlPHPPowerShell.propertiesProtocol BuffersPythonRRubySass (Sass)Sass (Scss)SchemeSQLShellSwiftSVGTSXTypeScriptWebAssemblyYAMLXML`   conda env create -f environment.yml  conda activate p2p-chat-env   `
 
-## Bước 3: Khởi chạy Discovery Server
+Hoặc cài đặt thủ công qua pip:
 
-Trong Terminal/Anaconda Prompt đang kích hoạt p2p-chat-env (hoặc mở một cửa sổ mới và kích hoạt lại):
+Bash
 
-Chạy Server:
+Plain textANTLR4BashCC#CSSCoffeeScriptCMakeDartDjangoDockerEJSErlangGitGoGraphQLGroovyHTMLJavaJavaScriptJSONJSXKotlinLaTeXLessLuaMakefileMarkdownMATLABMarkupObjective-CPerlPHPPowerShell.propertiesProtocol BuffersPythonRRubySass (Sass)Sass (Scss)SchemeSQLShellSwiftSVGTSXTypeScriptWebAssemblyYAMLXML`   pip install cryptography   `
 
-`python server.py`
+### 2\. Cấu trúc file
 
-Bạn sẽ thấy thông báo:
+*   server.py: Máy chủ danh bạ (Discovery Server).
+    
+*   peer.py: Ứng dụng chat dành cho người dùng.
+    
+*   checker.py: Công cụ kiểm toán (Audit) để kiểm tra tính nhất quán của Sổ cái.
+    
 
-`*** DISCOVERY SERVER đang lắng nghe trên 0.0.0.0:8888 ***`
+📖 Hướng dẫn sử dụng
+--------------------
 
-## Bước 4: Khởi chạy Peers (Sử dụng các cửa sổ Terminal khác nhau)
+### Bước 1: Khởi động Server
 
-Để demo chat P2P, bạn cần ít nhất hai cửa sổ Terminal khác (hoặc Anaconda Prompt) và đảm bảo mỗi cửa sổ đều đang kích hoạt p2p-chat-env.
+Chạy máy chủ danh bạ trước để các Peer có thể tìm thấy nhau:
 
-### Peer 1 (Alice)
+Bash
 
-Mở Terminal/Anaconda Prompt thứ hai và kích hoạt môi trường:
+Plain textANTLR4BashCC#CSSCoffeeScriptCMakeDartDjangoDockerEJSErlangGitGoGraphQLGroovyHTMLJavaJavaScriptJSONJSXKotlinLaTeXLessLuaMakefileMarkdownMATLABMarkupObjective-CPerlPHPPowerShell.propertiesProtocol BuffersPythonRRubySass (Sass)Sass (Scss)SchemeSQLShellSwiftSVGTSXTypeScriptWebAssemblyYAMLXML`   python server.py   `
 
-`conda activate p2p-chat-env  python peer.py`
+### Bước 2: Khởi động các Peer
 
-Nhập Username: Alice
+Mở các terminal mới cho từng người dùng (ví dụ: Alice và Bob).**Lưu ý:** Mỗi người dùng trên cùng một máy phải sử dụng một **P2P Port** khác nhau.
 
-Nhập P2P Port: 50001
+Bash
 
-Bạn sẽ thấy:
+Plain textANTLR4BashCC#CSSCoffeeScriptCMakeDartDjangoDockerEJSErlangGitGoGraphQLGroovyHTMLJavaJavaScriptJSONJSXKotlinLaTeXLessLuaMakefileMarkdownMATLABMarkupObjective-CPerlPHPPowerShell.propertiesProtocol BuffersPythonRRubySass (Sass)Sass (Scss)SchemeSQLShellSwiftSVGTSXTypeScriptWebAssemblyYAMLXML`   # Terminal 1 (Alice)  python peer.py  # Nhập Username: alice  # Nhập Passphrase: (mật khẩu bất kỳ để mã hóa file chat)  # Nhập P2P Port: 5001  # Terminal 2 (Bob)  python peer.py  # Nhập Username: bob  # Nhập Passphrase: (mật khẩu bất kỳ)  # Nhập P2P Port: 5002   `
 
-`[P2P Server] Đang lắng nghe trên [IP CỦA BẠN]:50001...`
+### Bước 3: Các lệnh trong ứng dụng
 
-### Peer 2 (Bob)
-
-Mở Terminal/Anaconda Prompt thứ ba và kích hoạt môi trường:
-
-`conda activate p2p-chat-env  python peer.py`
-
-Nhập Username: Bob
-
-Nhập P2P Port: 50002
-
-Bạn sẽ thấy:
-
-`[P2P Server] Đang lắng nghe trên [IP CỦA BẠN]:50002...`
-
-## Bước 5: Kiểm tra và Chat
-
-- Kiểm tra Server (Terminal 1): Server sẽ hiển thị thông báo đã nhận lệnh REGISTER từ cả Alice và Bob.
-- Tại cửa sổ Bob: Gõ lệnh PEERS để xem Alice.
-- Tại cửa sổ Bob: Gõ lệnh chat P2P:
-
-`CHAT Alice Chào Alice! Conda hoạt động tốt!`
-
-- Tại cửa sổ Alice: Bạn sẽ thấy tin nhắn trực tiếp xuất hiện.
-
-## Thoát khỏi Môi trường Conda
-
-Sau khi hoàn thành, bạn có thể tắt các Terminal. Để thoát khỏi môi trường conda:
-
-` conda deactivate  ``` `
+*   UPDATE: Cập nhật danh sách người dùng mới nhất từ Server hoặc qua mạng LAN.
+    
+*   PEERS: Xem danh sách những người đang online.
+    
+*   CHAT \[username\] \[nội dung\]: Gửi tin nhắn mã hóa.
+    
+*   HISTORY: Xem lịch sử trò chuyện (chỉ hiển thị các tin nhắn bạn có quyền đọc).
+    
+*   EXIT: Thoát ứng dụng và lưu dữ liệu.
