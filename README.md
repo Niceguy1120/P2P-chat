@@ -1,5 +1,3 @@
-Dưới đây là file README.md chuyên nghiệp, được thiết kế để bạn có thể dán trực tiếp vào thư mục đồ án. Nội dung tập trung vào cách cài đặt, vận hành và các kịch bản test để gây ấn tượng với giảng viên.
-
 # P2P Enterprise Chat System
 
 Đây là hệ thống trò chuyện phân tán (Peer-to-Peer) được thiết kế cho môi trường mạng nội bộ doanh nghiệp. Hệ thống tích hợp các cơ chế bảo mật nâng cao, tính nhất quán dữ liệu và khả năng tự phục hồi khi máy chủ danh bạ (Discovery Server) gặp sự cố.
@@ -29,11 +27,11 @@ Dưới đây là file README.md chuyên nghiệp, được thiết kế để b
 - Python 3.10 trở lên.
 - Cài đặt môi trường thông qua file environment.yml (khuyên dùng Conda):
 
-` conda env create -f environment.yml  conda activate p2p-chat-env `
+`conda env create -f environment.yml  conda activate p2p-chat-env`
 
 Hoặc cài đặt thủ công qua pip:
 
-` pip install cryptography `
+`pip install cryptography`
 
 ### 2\. Cấu trúc file
 
@@ -48,18 +46,21 @@ Hoặc cài đặt thủ công qua pip:
 Chạy máy chủ danh bạ trước để các Peer có thể tìm thấy nhau:
 
 Bash
-` python server.py `
+`python server.py`
 
 ### Bước 2: Khởi động các Peer
 
 Mở các terminal mới cho từng người dùng (ví dụ: Alice và Bob).**Lưu ý:** Mỗi người dùng trên cùng một máy phải sử dụng một **P2P Port** khác nhau.
 
 ` # Terminal 1 (Alice)`
+
 - `python peer.py `
 - `# Nhập Username: alice`
 - `# Nhập Passphrase: (mật khẩu bất kỳ để mã hóa file chat)`
 - `# Nhập P2P Port: 5001`
+
 `# Terminal 2 (Bob):`
+
 - `python peer.py`
 - `# Nhập Username: bob`
 - `# Nhập Passphrase: (mật khẩu bất kỳ)`
