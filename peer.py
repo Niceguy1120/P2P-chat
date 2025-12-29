@@ -45,7 +45,14 @@ def g_peers():
 @app.route('/get_messages')
 def g_msgs():
     # Giải mã toàn bộ ledger để hiển thị lên UI [cite: 11]
-    return jsonify([{"sender": m['sender'], "content": engine.decrypt_msg(m['content']), "vc": m['vc']} for m in engine.ledger])
+    return jsonify([
+        {
+            "sender": m['sender'],
+            "target": m.get('target', None),
+            "content": engine.decrypt_msg(m['content']),
+            "vc": m['vc']
+        } for m in engine.ledger
+    ])
 
 @app.route('/send_chat', methods=['POST'])
 def s_chat():
@@ -70,8 +77,8 @@ def s_chat():
                 msg_text.encode(), padding.OAEP(padding.MGF1(hashes.SHA256()), hashes.SHA256(), None)
             )).decode()
 
-            payload_to_send = {"sender": engine.username, "type": "CHAT", "content": enc_target, "vc": current_vc}
-            payload_to_save = {"sender": engine.username, "type": "CHAT", "content": enc_me, "vc": current_vc}
+            payload_to_send = {"sender": engine.username, "target": target, "type": "CHAT", "content": enc_target, "vc": current_vc}
+            payload_to_save = {"sender": engine.username, "target": target, "type": "CHAT", "content": enc_me, "vc": current_vc}
             
             engine.ledger.append(payload_to_save)
             engine.save_to_json() # Nhất quán cuối cùng [cite: 50, 51]
@@ -90,6 +97,9 @@ def p2p_listen():
         if raw:
             data = json.loads(raw)
             with engine.lock:
+                # Đảm bảo tin nhắn nhận được cũng có trường 'target'
+                if 'target' not in data:
+                    data['target'] = engine.username
                 engine.ledger.append(data)
                 # Cập nhật Vector Clock đồng bộ [cite: 40]
                 for k, v in data['vc'].items(): engine.vector_clock[k] = max(engine.vector_clock.get(k, 0), v)
