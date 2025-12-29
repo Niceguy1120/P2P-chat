@@ -22,17 +22,19 @@
             justify-content: center;
             align-items: center;
             z-index: 100;
+            transition: opacity 0.3s;
         }
 
         .card {
             background: white;
-            padding: 30px;
-            border-radius: 10px;
+            padding: 30px 30px 20px 30px;
+            border-radius: 12px;
             display: flex;
             flex-direction: column;
             gap: 15px;
-            width: 300px;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            width: 320px;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.18);
+            align-items: stretch;
         }
 
         .hidden {
@@ -42,30 +44,39 @@
         #header {
             background: #075e54;
             color: white;
-            padding: 15px;
+            padding: 15px 24px;
             display: flex;
             justify-content: space-between;
+            align-items: center;
+            font-size: 1.1em;
+            letter-spacing: 1px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
         }
 
         #chat-box {
             flex: 1;
             overflow-y: auto;
-            padding: 20px;
+            padding: 24px 20px 24px 20px;
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 12px;
+            background: #ece5dd;
         }
 
         .msg {
-            padding: 10px;
-            border-radius: 8px;
+            padding: 12px 16px;
+            border-radius: 16px;
             max-width: 70%;
-            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+            font-size: 1em;
+            word-break: break-word;
+            position: relative;
+            transition: background 0.2s;
         }
 
         .sent {
             align-self: flex-end;
-            background: #dcf8c6;
+            background: linear-gradient(120deg, #dcf8c6 80%, #b9f5d8 100%);
         }
 
         .rcvd {
@@ -73,12 +84,26 @@
             background: white;
         }
 
+        .msg strong {
+            color: #075e54;
+            font-size: 0.98em;
+        }
+
+        .msg .meta {
+            font-size: 9px;
+            color: #888;
+            border-top: 1px solid #eee;
+            margin-top: 7px;
+            padding-top: 2px;
+        }
+
         #controls {
-            padding: 15px;
+            padding: 15px 20px;
             background: #f0f0f0;
             display: flex;
             gap: 10px;
             border-top: 1px solid #ddd;
+            align-items: center;
         }
 
         input,
@@ -87,6 +112,31 @@
             border-radius: 20px;
             border: 1px solid #ccc;
             outline: none;
+            font-size: 1em;
+        }
+
+        #msg-in {
+            flex: 1;
+            min-width: 0;
+        }
+
+        #status-bar {
+            background: #fff3cd;
+            color: #856404;
+            padding: 8px 20px;
+            font-size: 0.98em;
+            border-bottom: 1px solid #ffeeba;
+            display: none;
+        }
+
+        #status-bar.active {
+            display: block;
+        }
+
+        .error {
+            background: #f8d7da !important;
+            color: #721c24 !important;
+            border-color: #f5c6cb !important;
         }
     </style>
 </head>
@@ -94,92 +144,179 @@
 <body>
     <div id="login-overlay">
         <div class="card">
-            <h2 style="text-align:center; color:#075e54">P2P Login</h2>
-            <input type="text" id="u-in" placeholder="Username">
-            <input type="password" id="p-in" placeholder="Passphrase proposal">
-            <button onclick="login()"
-                style="padding:10px; background:#128c7e; color:white; border:none; border-radius:20px; cursor:pointer;">VÀO
+            <h2 style="text-align:center; color:#075e54; margin-bottom:0;">P2P Chat Đăng nhập</h2>
+            <input type="text" id="u-in" placeholder="Tên đăng nhập" autocomplete="username" autofocus>
+            <input type="password" id="p-in" placeholder="Passphrase bảo mật" autocomplete="current-password">
+            <button id="login-btn" onclick="login()"
+                style="padding:10px; background:#128c7e; color:white; border:none; border-radius:20px; cursor:pointer; font-size:1em;">VÀO
                 CHAT</button>
+            <div id="login-err" style="color:#c00; text-align:center; font-size:0.98em; display:none;"></div>
         </div>
     </div>
-
-    <div id="main-app" class="hidden" style="display:flex; flex-direction:column; height:100%;">
-        <div id="header">
-            <span id="user-display"></span>
-            <span id="port-display"></span>
+    <div id="status-bar"></div>
+    <div id="main-app" class="hidden" style="display:flex; flex:1; height:100%;">
+        <div id="sidebar"
+            style="width:220px; background:#fff; border-right:1px solid #ddd; display:flex; flex-direction:column;">
+            <div style="padding:16px; font-weight:bold; color:#075e54; border-bottom:1px solid #eee;">Danh sách hội
+                thoại</div>
+            <div id="peer-list" style="flex:1; overflow-y:auto;"></div>
         </div>
-        <div id="chat-box"></div>
-        <div id="controls">
-            <select id="target-select">
-                <option value="">-- Chọn người nhận --</option>
-            </select>
-            <input type="text" id="msg-in" style="flex:1" placeholder="Nhập tin nhắn..."
-                onkeypress="if(event.key==='Enter') send()">
-            <button onclick="send()"
-                style="padding:10px 20px; background:#128c7e; color:white; border:none; border-radius:20px;">GỬI</button>
+        <div style="flex:1; display:flex; flex-direction:column;">
+            <div id="header">
+                <span id="user-display"></span>
+                <span id="port-display"></span>
+                <span id="current-peer" style="margin-left:auto; font-weight:bold;"></span>
+            </div>
+            <div id="chat-box"></div>
+            <div id="controls">
+                <input type="text" id="msg-in" placeholder="Nhập tin nhắn..."
+                    onkeypress="if(event.key==='Enter') send()">
+                <button id="send-btn" onclick="send()"
+                    style="padding:10px 20px; background:#128c7e; color:white; border:none; border-radius:20px; font-size:1em;">GỬI</button>
+            </div>
         </div>
     </div>
 
     <script>
         let myUser = "";
+        let chatTimer = null, peerTimer = null;
+        let currentPeer = "";
+        let allMessages = [];
+        function showStatus(msg, type = "") {
+            const bar = document.getElementById('status-bar');
+            bar.innerText = msg;
+            bar.className = type ? `active ${type}` : 'active';
+        }
+        function hideStatus() {
+            const bar = document.getElementById('status-bar');
+            bar.className = '';
+            bar.innerText = '';
+        }
         function login() {
-            const u = document.getElementById('u-in').value.toLowerCase();
+            const u = document.getElementById('u-in').value.trim().toLowerCase();
             const p = document.getElementById('p-in').value;
-            if (!u || !p) return alert("Nhập đủ thông tin!");
-
+            const err = document.getElementById('login-err');
+            err.style.display = 'none';
+            if (!u || !p) {
+                err.innerText = "Vui lòng nhập đủ thông tin!";
+                err.style.display = 'block';
+                return;
+            }
+            document.getElementById('login-btn').disabled = true;
+            showStatus("Đang xác thực...");
             fetch('/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username: u, passphrase: p })
             }).then(res => res.json()).then(data => {
+                document.getElementById('login-btn').disabled = false;
                 if (data.status === 'ok') {
                     myUser = u;
                     document.getElementById('login-overlay').classList.add('hidden');
                     document.getElementById('main-app').classList.remove('hidden');
-                    document.getElementById('user-display').innerText = "User: " + u.toUpperCase();
-                    setInterval(updateChat, 1500);
-                    setInterval(updatePeers, 5000);
-                } else { alert(data.message); }
+                    document.getElementById('user-display').innerText = "👤 " + u.toUpperCase();
+                    document.getElementById('port-display').innerText = '';
+                    hideStatus();
+                    updateChat();
+                    updatePeers();
+                    chatTimer = setInterval(updateChat, 1500);
+                    peerTimer = setInterval(updatePeers, 5000);
+                } else {
+                    err.innerText = data.message || "Đăng nhập thất bại!";
+                    err.style.display = 'block';
+                    showStatus("Đăng nhập thất bại!", "error");
+                }
+            }).catch(() => {
+                document.getElementById('login-btn').disabled = false;
+                err.innerText = "Lỗi kết nối máy chủ!";
+                err.style.display = 'block';
+                showStatus("Lỗi kết nối máy chủ!", "error");
             });
         }
-
         function updateChat() {
             fetch('/get_messages').then(res => res.json()).then(data => {
-                const box = document.getElementById('chat-box');
-                box.innerHTML = data.map(m => `
-                    <div class="msg ${m.sender === myUser ? 'sent' : 'rcvd'}">
-                        <strong>${m.sender.toUpperCase()}</strong><br>${m.content}
-                        <div style="font-size:9px; color:gray; border-top:1px solid #eee; margin-top:5px;">VC: ${JSON.stringify(m.vc)}</div>
-                    </div>
-                `).join('');
-                box.scrollTop = box.scrollHeight;
-            });
+                if (!Array.isArray(data)) return;
+                allMessages = data;
+                renderChat();
+            }).catch(() => showStatus("Không thể tải tin nhắn!", "error"));
         }
 
+        function renderChat() {
+            const box = document.getElementById('chat-box');
+            if (!currentPeer) {
+                box.innerHTML = '<div style="color:#888;text-align:center;margin-top:40px;">Chọn một hội thoại để bắt đầu chat</div>';
+                return;
+            }
+            const filtered = allMessages.filter(m =>
+                (m.sender === myUser && m.target === currentPeer) ||
+                (m.sender === currentPeer && m.target === myUser)
+            );
+            box.innerHTML = filtered.map(m => `
+                <div class="msg ${m.sender === myUser ? 'sent' : 'rcvd'}">
+                    <strong>${m.sender.toUpperCase()}</strong><br>${m.content}
+                    <div class="meta">VC: ${JSON.stringify(m.vc)}</div>
+                </div>
+            `).join('');
+            box.scrollTop = box.scrollHeight;
+        }
         function updatePeers() {
             fetch('/get_peers').then(res => res.json()).then(peers => {
-                const sel = document.getElementById('target-select');
-                const val = sel.value;
-                sel.innerHTML = '<option value="">-- Chọn người nhận --</option>';
-                peers.forEach(p => {
-                    const opt = document.createElement('option');
-                    opt.value = p; opt.innerText = p.toUpperCase();
-                    if (p === val) opt.selected = true;
-                    sel.appendChild(opt);
+                const list = document.getElementById('peer-list');
+                list.innerHTML = '';
+                (peers || []).forEach(p => {
+                    const div = document.createElement('div');
+                    div.innerText = p.toUpperCase();
+                    div.className = 'peer-item' + (p === currentPeer ? ' active' : '');
+                    div.style = `padding:12px 18px;cursor:pointer;border-bottom:1px solid #f2f2f2;${p === currentPeer ? 'background:#e5f6f0;font-weight:bold;' : ''}`;
+                    div.onclick = () => { currentPeer = p; document.getElementById('current-peer').innerText = '💬 ' + p.toUpperCase(); renderChat(); updatePeers(); };
+                    list.appendChild(div);
                 });
-            });
+                // Nếu chưa chọn peer nào, tự động chọn peer đầu tiên
+                if (!currentPeer && peers && peers.length > 0) {
+                    currentPeer = peers[0];
+                    document.getElementById('current-peer').innerText = '💬 ' + currentPeer.toUpperCase();
+                    renderChat();
+                }
+                if (peers.length === 0) {
+                    currentPeer = '';
+                    document.getElementById('current-peer').innerText = '';
+                    renderChat();
+                }
+            }).catch(() => showStatus("Không thể tải danh sách peer!", "error"));
         }
-
         function send() {
-            const t = document.getElementById('target-select').value;
+            const t = currentPeer;
             const m = document.getElementById('msg-in').value;
-            if (!t || !m) return;
+            if (!t) {
+                showStatus("Chọn hội thoại để gửi!", "error");
+                return;
+            }
+            if (!m) return;
+            document.getElementById('send-btn').disabled = true;
             fetch('/send_chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ target: t, message: m })
-            }).then(() => { document.getElementById('msg-in').value = ''; updateChat(); });
+            }).then(() => {
+                document.getElementById('msg-in').value = '';
+                updateChat();
+                hideStatus();
+            }).catch(() => showStatus("Không gửi được tin!", "error"))
+                .finally(() => { document.getElementById('send-btn').disabled = false; });
         }
+        // Thêm CSS cho peer-item
+        const style = document.createElement('style');
+        style.innerHTML = `.peer-item:hover {background:#e5f6f0;} .peer-item.active {background:#e5f6f0;font-weight:bold;}`;
+        document.head.appendChild(style);
+        // Enter key on login
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('u-in').addEventListener('keypress', e => {
+                if (e.key === 'Enter') login();
+            });
+            document.getElementById('p-in').addEventListener('keypress', e => {
+                if (e.key === 'Enter') login();
+            });
+        });
     </script>
 </body>
 

@@ -10,9 +10,8 @@ class P2PEngine:
         self.username = None
         self.ledger = []
         self.vector_clock = {}
-        self.peer_list = {}
+        self.peer_list = {} # Danh bạ (IP, Port, PubKey)
         self.lock = threading.Lock()
-        # Tạo cặp khóa RSA cho node [cite: 40]
         self.private_key = rsa.generate_private_key(65537, 2048)
         self.pub_key_pem = self.private_key.public_key().public_bytes(
             serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo).decode()
@@ -34,18 +33,23 @@ class P2PEngine:
                     data = json.loads(temp_cipher.decrypt(f.read()).decode())
                 self.ledger = data.get('ledger', [])
                 self.vector_clock = data.get('vc', {u: 0})
+                self.peer_list = data.get('peer_cache', {}) # Load danh bạ local
                 self.cipher = temp_cipher
-                return True, "Đăng nhập thành công"
+                return True, "OK"
             except: return False, "Sai Passphrase!"
         else:
             self.vector_clock = {u: 0}
             self.cipher = temp_cipher
-            self.save_to_json() # Lưu trữ cục bộ dưới dạng JSON mã hóa [cite: 15, 27]
-            return True, "Tài khoản mới đã được tạo"
+            self.save()
+            return True, "Tạo mới OK"
 
-    def save_to_json(self):
+    def save(self):
         if not self.cipher: return
-        data = {"ledger": self.ledger, "vc": self.vector_clock}
+        data = {
+            "ledger": self.ledger, 
+            "vc": self.vector_clock,
+            "peer_cache": self.peer_list # Lưu danh bạ để chat offline
+        }
         with open(f"{self.username}.json", 'wb') as f:
             f.write(self.cipher.encrypt(json.dumps(data).encode()))
 
@@ -55,10 +59,10 @@ class P2PEngine:
                 base64.b64decode(text), 
                 padding.OAEP(padding.MGF1(hashes.SHA256()), hashes.SHA256(), None)
             ).decode()
-        except: return "[Lỗi giải mã]"
+        except: return "[Tin nhắn mã hóa]"
 
     def get_auto_port(self, start):
-        for p in range(start, start + 100):
+        for p in range(start, start+100):
             with socket.socket() as s:
                 if s.connect_ex(('localhost', p)) != 0: return p
         return None
