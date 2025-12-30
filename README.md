@@ -50,21 +50,9 @@ Bash
 
 ### Bước 2: Khởi động các Peer
 
-Mở các terminal mới cho từng người dùng (ví dụ: Alice và Bob).**Lưu ý:** Mỗi người dùng trên cùng một máy phải sử dụng một **P2P Port** khác nhau.
+Chạy ` python peer.py `. 
+Hệ thống sẽ tự động tìm các Port trống và hiện thông báo: [HỆ THỐNG] TRUY CẬP TẠI: http://127.0.0.1:8000
 
-` # Terminal 1 (Alice)`
-
-- `python peer.py `
-- `# Nhập Username: alice`
-- `# Nhập Passphrase: (mật khẩu bất kỳ để mã hóa file chat)`
-- `# Nhập P2P Port: 5001`
-
-`# Terminal 2 (Bob):`
-
-- `python peer.py`
-- `# Nhập Username: bob`
-- `# Nhập Passphrase: (mật khẩu bất kỳ)`
-- `# Nhập P2P Port: 5002  `
 
 ### Bước 3: Các lệnh trong ứng dụng
 
